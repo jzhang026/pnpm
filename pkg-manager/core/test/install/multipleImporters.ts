@@ -1956,3 +1956,67 @@ require("fs").writeFileSync("created-by-prepare", "", "utf8")`)
 
   expect(fs.existsSync('project-1/created-by-prepare')).toBeTruthy()
 })
+
+test('remove a workspace project should also remove the importers record in lockfile (during non-headless install)', async () => {
+  preparePackages([
+    {
+      location: 'project-1',
+      package: { name: 'project-1' },
+    },
+    {
+      location: 'project-2',
+      package: { name: 'project-2' },
+    },
+  ])
+
+  const importers: MutatedProject[] = [
+    {
+      mutation: 'install',
+      rootDir: path.resolve('project-1') as ProjectRootDir,
+    },
+    {
+      mutation: 'install',
+      rootDir: path.resolve('project-2') as ProjectRootDir,
+    },
+  ]
+  const allProjects = [
+    {
+      buildIndex: 0,
+      manifest: {
+        name: 'project-1',
+        version: '1.0.0',
+
+        dependencies: {
+          'is-positive': '1.0.0',
+        },
+      },
+      rootDir: path.resolve('project-1') as ProjectRootDir,
+    },
+    {
+      buildIndex: 0,
+      manifest: {
+        name: 'project-2',
+        version: '1.0.0',
+
+        dependencies: {
+          'is-negative': '1.0.0',
+        },
+      },
+      rootDir: path.resolve('project-2') as ProjectRootDir,
+    },
+  ]
+  // have two mocked projects in same workspace installed
+  await mutateModules(importers, testDefaults({ allProjects }))
+  // remove the 2nd projects from the workspace
+  await mutateModules(importers.slice(0, 1), testDefaults({ allProjects: allProjects.slice(0, 1), lockfileOnly: true, pruneLockfileImporters: false /* change this config to true to have the test pass */ }))
+
+  const project = assertProject(process.cwd())
+
+  const wantedLockfile = project.readLockfile()
+  expect(Object.keys(wantedLockfile.importers)).toStrictEqual(['project-1'])
+  expect(Object.keys(wantedLockfile.packages)).toStrictEqual(['is-positive@1.0.0'])
+
+  const currentLockfile = project.readCurrentLockfile()
+  // lock file record inside of `.pnpm` is still kept.
+  expect(Object.keys(currentLockfile.importers)).toStrictEqual(['project-1', 'project-2'])
+})
